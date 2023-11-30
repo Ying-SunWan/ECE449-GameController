@@ -7,7 +7,7 @@ import numpy as np
 
 BULLET_SPEED = 800
 
-class TeamController(KesslerController):
+class FuzzyController(KesslerController):
 
     def __init__(self):
         self.eval_frames = 0  # What is this?
@@ -43,9 +43,9 @@ class TeamController(KesslerController):
         target_rules = [
             ctrl.Rule(bullet_time['L'], ship_fire['N']),
             ctrl.Rule(bullet_time['M'] & theta_delta['NL'], (ship_turn['NL'], ship_fire['N'])),
-            ctrl.Rule(bullet_time['M'] & theta_delta['NS'], (ship_turn['NS'], ship_fire['Y'])),
+            ctrl.Rule(bullet_time['M'] & theta_delta['NS'], (ship_turn['NS'], ship_fire['N'])),
             ctrl.Rule(bullet_time['M'] & theta_delta['Z'], (ship_turn['Z'], ship_fire['Y'])),
-            ctrl.Rule(bullet_time['M'] & theta_delta['PS'], (ship_turn['PS'], ship_fire['Y'])),
+            ctrl.Rule(bullet_time['M'] & theta_delta['PS'], (ship_turn['PS'], ship_fire['N'])),
             ctrl.Rule(bullet_time['M'] & theta_delta['PL'], (ship_turn['PL'], ship_fire['N'])),
             ctrl.Rule(bullet_time['S'] & theta_delta['NL'], (ship_turn['NL'], ship_fire['N'])),
             ctrl.Rule(bullet_time['S'] & theta_delta['NS'], (ship_turn['NS'], ship_fire['Y'])),
@@ -81,17 +81,12 @@ class TeamController(KesslerController):
 
         moving_rules = [
             ctrl.Rule(aster_distance['S'] & asteroid_size['S'] & in_danger['Y'], (ship_thrust_rate['NL'])),
-            ctrl.Rule(aster_distance['S'] & asteroid_size['S'] & in_danger['N'], (ship_thrust_rate['emergency'])),
-            ctrl.Rule(aster_distance['S'] & asteroid_size['M'] & in_danger['Y'], (ship_thrust_rate['emergency'])),
-            ctrl.Rule(aster_distance['S'] & asteroid_size['M'] & in_danger['N'], (ship_thrust_rate['emergency'])),
-            ctrl.Rule(aster_distance['S'] & asteroid_size['L'] & in_danger['Y'], (ship_thrust_rate['emergency'])),
-            ctrl.Rule(aster_distance['S'] & asteroid_size['L'] & in_danger['N'], (ship_thrust_rate['emergency'])),
+            ctrl.Rule(aster_distance['S'], (ship_thrust_rate['emergency'])),
             ctrl.Rule(aster_distance['M'] & asteroid_size['S'] & in_danger['Y'], (ship_thrust_rate['NS'])),
             ctrl.Rule(aster_distance['M'] & asteroid_size['S'] & in_danger['N'], (ship_thrust_rate['PS'])),
             ctrl.Rule(aster_distance['M'] & asteroid_size['M'] & in_danger['Y'], (ship_thrust_rate['Z'])),
             ctrl.Rule(aster_distance['M'] & asteroid_size['M'] & in_danger['N'], (ship_thrust_rate['PS'])),
-            ctrl.Rule(aster_distance['M'] & asteroid_size['L'] & in_danger['Y'], (ship_thrust_rate['NL'])),
-            ctrl.Rule(aster_distance['M'] & asteroid_size['L'] & in_danger['N'], (ship_thrust_rate['NS'])),
+            ctrl.Rule(aster_distance['M'] & asteroid_size['L'], (ship_thrust_rate['NL'])),
             ctrl.Rule(aster_distance['L'], (ship_thrust_rate['PL'])),
         ]
         self.moving_control = ctrl.ControlSystem(moving_rules)
@@ -99,10 +94,11 @@ class TeamController(KesslerController):
     def setup_danger_fuzzy_system(self):
         collision_time = ctrl.Antecedent(np.arange(0, 5, 0.1), 'collision_time')
         asteroid_size = ctrl.Antecedent(np.arange(0, 5, 1), 'aster_size')
+        aster_distance = ctrl.Antecedent(np.arange(0, 300, 0.1), 'aster_distance')
         collision_likely = ctrl.Consequent(np.arange(-1, 1, 0.1), 'collision_likely')
         danger = ctrl.Consequent(np.arange(0, 10, 0.1), 'danger')
 
-        collision_time['S'] = fuzz.trimf(collision_time.universe, [0, 0, 3])
+        collision_time['S'] = fuzz.trimf(collision_time.universe, [0, 0, 1])
         collision_time['M'] = fuzz.trimf(collision_time.universe, [0, 3, 5])
         collision_time['L'] = fuzz.trimf(collision_time.universe, [3, 5, 5])
 
@@ -112,31 +108,25 @@ class TeamController(KesslerController):
         asteroid_size['ML'] = fuzz.trimf(asteroid_size.universe, [2, 3, 4])
         asteroid_size['L'] = fuzz.trimf(asteroid_size.universe, [3, 4, 4])
 
+        aster_distance['S'] = fuzz.trimf(aster_distance.universe, [0, 0, 20])
+        aster_distance['M'] = fuzz.trimf(aster_distance.universe, [10, 90, 140])
+        aster_distance['L'] = fuzz.trimf(aster_distance.universe, [130, 300, 300])
+
         collision_likely['N'] = fuzz.trimf(collision_likely.universe, [-1, -1, 0.0])
         collision_likely['Y'] = fuzz.trimf(collision_likely.universe, [0.0, 1, 1])
 
-        danger['S'] = fuzz.trimf(danger.universe, [0, 0, 2.5])
-        danger['MS'] = fuzz.trimf(danger.universe, [1.25, 2.5, 2.75])
+        danger['emergency'] = fuzz.trimf(danger.universe, [9, 10, 10])
+        danger['S'] = fuzz.trimf(danger.universe, [0, 0, 5])
         danger['M'] = fuzz.trimf(danger.universe, [2.5, 5, 7.5])
-        danger['ML'] = fuzz.trimf(danger.universe, [6.25, 7.5, 8.75])
-        danger['L'] = fuzz.trimf(danger.universe, [7.5, 10, 10])
+        danger['L'] = fuzz.trimf(danger.universe, [5, 10, 10])
 
         danger_rules = [
-            ctrl.Rule(collision_time['S'] & asteroid_size['S'], (collision_likely['Y'], danger['ML'])),
-            ctrl.Rule(collision_time['S'] & asteroid_size['MS'], (collision_likely['Y'], danger['L'])),
-            ctrl.Rule(collision_time['S'] & asteroid_size['M'], (collision_likely['Y'], danger['L'])),
-            ctrl.Rule(collision_time['S'] & asteroid_size['ML'], (collision_likely['Y'], danger['L'])),
-            ctrl.Rule(collision_time['S'] & asteroid_size['L'], (collision_likely['Y'], danger['L'])),
+            ctrl.Rule(collision_time['S'] | aster_distance['S'], (collision_likely['Y'], danger['emergency'])),
             ctrl.Rule(collision_time['M'] & asteroid_size['S'], (collision_likely['N'], danger['M'])),
-            ctrl.Rule(collision_time['M'] & asteroid_size['MS'], (collision_likely['Y'], danger['M'])),
-            ctrl.Rule(collision_time['M'] & asteroid_size['M'], (collision_likely['Y'], danger['ML'])),
-            ctrl.Rule(collision_time['M'] & asteroid_size['ML'], (collision_likely['Y'], danger['L'])),
-            ctrl.Rule(collision_time['M'] & asteroid_size['L'], (collision_likely['Y'], danger['L'])),
-            ctrl.Rule(collision_time['L'] & asteroid_size['S'], (collision_likely['N'], danger['S'])),
-            ctrl.Rule(collision_time['L'] & asteroid_size['MS'], (collision_likely['N'], danger['MS'])),
-            ctrl.Rule(collision_time['L'] & asteroid_size['M'], (collision_likely['N'], danger['M'])),
-            ctrl.Rule(collision_time['L'] & asteroid_size['ML'], (collision_likely['N'], danger['M'])),
-            ctrl.Rule(collision_time['L'] & asteroid_size['L'], (collision_likely['Y'], danger['L'])),
+            ctrl.Rule(collision_time['M'] & asteroid_size['MS'], (collision_likely['N'], danger['M'])),
+            ctrl.Rule(collision_time['M'] & aster_distance['M'], (collision_likely['Y'], danger['M'])),
+            ctrl.Rule(asteroid_size['L'], (collision_likely['Y'], danger['L'])),
+            ctrl.Rule(aster_distance['L'], (collision_likely['N'], danger['M'])),
         ]
         self.danger_control = ctrl.ControlSystem(danger_rules)
 
@@ -158,26 +148,26 @@ class TeamController(KesslerController):
         closest_asteroids.sort(key=lambda x: x["dist"])
         closest_asteroids = closest_asteroids[:n]
 
-        return closest_asteroids
+        return closest_asteroids, closest_asteroid_count
 
     def locate_smallest_asteroid(self, closest_asteroids):
         closest_asteroids.sort(key=lambda x: x['aster']['size'])
 
+        # Also gets the closest for multiple of the smallest size
         closest = closest_asteroids[0]['dist']
         smallest = closest_asteroids[0]
+        print(smallest['aster']['size'])
         for a in closest_asteroids:
-            if a['aster']['size'] == closest_asteroids[0]['aster']['size']:
+            if a['aster']['size'] == smallest['aster']['size']:
                 if a['dist'] < closest:
                     smallest = a
                     closest = a['dist']
-                print(closest)
-            else:
-                break
+                    print(closest)
         return smallest
 
     def locate_biggest_asteroid(self, closest_asteroids):
         closest_asteroids.sort(key=lambda x: x['aster']['size'])
-
+        # Also gets the closest for multiple of the biggest size
         closest = closest_asteroids[-1]['dist']
         biggest = closest_asteroids[-1]
         for a in closest_asteroids:
@@ -185,13 +175,12 @@ class TeamController(KesslerController):
                 if a['dist'] < closest:
                     biggest = a
                     closest = a['dist']
-                print(closest)
         return biggest
 
-    def target(self, ship_state, target_asteroid, thrust=[0,0]):
+    def target(self, ship_state, target_asteroid, thrust=0):
         # Find the closest asteroid (disregards asteroid velocity)
-        ship_pos_x = ship_state["position"][0]  # See src/kesslergame/ship.py in the KesslerGame Github
-        ship_pos_y = ship_state["position"][1]
+        ship_pos_x = ship_state["position"][0] + thrust  # See src/kesslergame/ship.py in the KesslerGame Github
+        ship_pos_y = ship_state["position"][1] + thrust
 
         asteroid_ship_x = ship_pos_x - target_asteroid["aster"]["position"][0]
         asteroid_ship_y = ship_pos_y - target_asteroid["aster"]["position"][1]
@@ -270,6 +259,36 @@ class TeamController(KesslerController):
 
         return False, 0
 
+    def escape(self,ship_state, map_size, n_closest_asteroids):
+        angles = []
+        n = len(n_closest_asteroids)
+
+        for ast in n_closest_asteroids:
+            rel_ax, rel_ay = self.rel_asteroid_pos(ship_state['position'], ast['position'], map_size)
+
+            angle = (360 + math.atan2(rel_ay, rel_ax) * 180 / math.pi) % 360
+            angles.append(angle)
+
+        max_delta = 0
+        ca = None
+        angles = sorted(angles)
+        for i in range(n):
+            cur, next = angles[i], angles[(i + 1) % n]
+            delta = (next - cur + 360) % 360
+            if delta > max_delta:
+                max_delta = delta
+                ca = (cur + delta / 2) % 360
+
+        if ca is None:
+            ca = (angles[0] + 180) % 360
+
+        # Lastly, find the difference betwwen firing angle and the ship's current orientation. BUT THE SHIP HEADING IS IN DEGREES.
+        delta = ca - ship_state["heading"]
+        if delta > 180:
+            delta -= 360
+
+        return delta
+
     def actions(self, ship_state: Dict, game_state: Dict) -> Tuple[float, float, bool, bool]:
         def act(target):
             moving_sim = ctrl.ControlSystemSimulation(self.moving_control, flush_after_run=1)
@@ -279,7 +298,7 @@ class TeamController(KesslerController):
             moving_sim.input['in_danger'] = collision_likely
             moving_sim.compute()
 
-            thrust = moving_sim.output['ship_thrust_rate']  # + largest_asteroid['aster']['radius']
+            thrust = moving_sim.output['ship_thrust_rate']
 
             target_angle, bullet_time = self.target(ship_state, target)
             targeting_sim = ctrl.ControlSystemSimulation(self.targeting_control, flush_after_run=1)
@@ -292,7 +311,10 @@ class TeamController(KesslerController):
 
             return thrust, turn_rate, fire
 
-        closest_asters = self.locate_n_closest_asteroids(3, ship_state, game_state)
+        closest_asters = self.locate_n_closest_asteroids(3, ship_state, game_state)[0]
+        num_too_close = self.locate_n_closest_asteroids(3, ship_state, game_state)[1]
+        # if num_too_close >= 5:
+
         most_dangerous_asteroid = closest_asters[0]
         highest_danger = 0
 
@@ -301,6 +323,7 @@ class TeamController(KesslerController):
 
             danger_sim = ctrl.ControlSystemSimulation(self.danger_control, flush_after_run=1)
             danger_sim.input['collision_time'] = collide_time
+            danger_sim.input['aster_distance'] = a['dist']
             danger_sim.input['aster_size'] = a['aster']['size']
             danger_sim.compute()
             danger = danger_sim.output['danger']
@@ -312,11 +335,13 @@ class TeamController(KesslerController):
         will_collide, collide_time = self.collision_imminent(ship_state, most_dangerous_asteroid)
         danger_sim = ctrl.ControlSystemSimulation(self.danger_control, flush_after_run=1)
         danger_sim.input['collision_time'] = collide_time
+        danger_sim.input['aster_distance'] = most_dangerous_asteroid['dist']
         danger_sim.input['aster_size'] = most_dangerous_asteroid['aster']['size']
         danger_sim.compute()
         collision_likely = danger_sim.output['collision_likely']
 
-        if collision_likely > -0.8:
+        print(collision_likely)
+        if collision_likely > 0:
             thrust, turn_rate, fire = act(most_dangerous_asteroid)
         elif highest_danger >= 5:
             smallest_asteroid = self.locate_smallest_asteroid(closest_asters)
